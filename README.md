@@ -11,6 +11,7 @@ This small app fixes that, with no driver to install.
 - **Knob sensitivity:** low, medium or high.
 - **Real card name:** Windows shows "ASUS Xonar U1" instead of "USB Advanced Audio Device".
 - **Starts with Windows:** set it up once and forget it.
+- **Updates on your terms:** check for a new version from the panel, then install it with one click or ignore it. The app only contacts GitHub when you ask.
 
 ## Install
 
@@ -22,7 +23,7 @@ That's it. The panel opens straight away, and the knob works. The new card name 
 
 To change settings later, click the ring icon in the system tray. It may be hidden under the `^` arrow.
 
-To update, download and run the latest version the same way.
+To update, click **Check for updates** at the bottom of the panel. Versions before 1.0.4 don't have this link, so download and run the latest version the same way.
 
 ## Uninstall
 

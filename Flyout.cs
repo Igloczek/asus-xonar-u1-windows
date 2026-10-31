@@ -3,6 +3,7 @@
 using System;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -27,6 +28,7 @@ static partial class XonarU1
         const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20, DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWA_SYSTEMBACKDROP_TYPE = 38;
         const int CornerRound = 2, BackdropAcrylic = 3;
         const int GWL_STYLE = -16, WS_SYSMENU = 0x00080000;
+        const string CheckLabel = "Check for updates";
 
         readonly Tray tray;
         readonly Window window;
@@ -34,7 +36,9 @@ static partial class XonarU1
         readonly TranslateTransform slide;
         readonly TextBlock status;
         readonly CheckBox ledSwitch;
-        readonly TextBlock ledState;
+        readonly TextBlock ledState, updateStatus;
+        readonly Button updateAction;
+        string updateTag;
         readonly StackPanel ledOptions;
         readonly UniformGrid ledColors, effects, sensitivity;
         readonly IntPtr hwnd;
@@ -90,6 +94,11 @@ static partial class XonarU1
             }
 
             ((Button)panel.FindName("Exit")).Click += (s, e) => Application.Current.Shutdown();
+
+            updateStatus = (TextBlock)panel.FindName("UpdateStatus");
+            updateAction = (Button)panel.FindName("UpdateAction");
+            updateAction.Click += (s, e) => { if (updateTag == null) CheckForUpdate(); else InstallUpdate(); };
+            ShowUpdateState("Version " + Version, CheckLabel, true);
 
             window = new Window
             {
@@ -164,6 +173,53 @@ static partial class XonarU1
             status.Text = StatusText(connected);
             ledCard.IsEnabled = connected;
             knobCard.IsEnabled = connected;
+        }
+
+        void ShowUpdateState(string text, string action, bool enabled)
+        {
+            updateStatus.Text = text;
+            updateAction.Content = action;
+            updateAction.IsEnabled = enabled;
+        }
+
+        // Runs slow network work off the UI thread, then shows the outcome.
+        void RunUpdateStep(Func<Action> work, string failure)
+        {
+            new Thread(() =>
+            {
+                Action done;
+                try { done = work(); }
+                catch (Exception) { done = () => ShowUpdateState(failure, CheckLabel, true); }
+                panel.Dispatcher.BeginInvoke(done);
+            }) { IsBackground = true }.Start();
+        }
+
+        void CheckForUpdate()
+        {
+            ShowUpdateState("Checking for updates...", CheckLabel, false);
+            RunUpdateStep(() =>
+            {
+                string tag = LatestTag();
+                if (!IsNewer(tag))
+                    return () => ShowUpdateState("Version " + Version + " is up to date", CheckLabel, true);
+                return () =>
+                {
+                    updateTag = tag;
+                    ShowUpdateState("Version " + tag.TrimStart('v') + " is available", "Update", true);
+                };
+            }, "Couldn't check for updates");
+        }
+
+        void InstallUpdate()
+        {
+            string tag = updateTag;
+            updateTag = null;
+            ShowUpdateState("Downloading update...", "Update", false);
+            RunUpdateStep(() =>
+            {
+                DownloadAndRunSetup(tag);
+                return () => ShowUpdateState("Installing update...", "Update", false);
+            }, "Couldn't download the update");
         }
 
         void LedChanged()

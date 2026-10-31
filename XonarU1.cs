@@ -292,7 +292,7 @@ static partial class XonarU1
             key.SetValue("DisplayIcon", InstalledExe);
             key.SetValue("InstallLocation", InstallDir);
             key.SetValue("UninstallString", "\"" + InstalledExe + "\" --uninstall");
-            key.SetValue("URLInfoAbout", "https://github.com/Igloczek/asus-xonar-u1-windows");
+            key.SetValue("URLInfoAbout", RepoUrl);
             key.SetValue("EstimatedSize", (int)(new FileInfo(InstalledExe).Length / 1024), RegistryValueKind.DWord);
             key.SetValue("NoModify", 1, RegistryValueKind.DWord);
             key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
