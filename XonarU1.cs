@@ -24,6 +24,7 @@ static partial class XonarU1
     // The card reports itself as "USB Advanced Audio Device".
     const string CardName = "ASUS Xonar U1";
     const string AudioFunctionFilter = "VID_0B05&PID_1743&MI_00";
+    const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\XonarU1";
     const int SPDRP_FRIENDLYNAME = 0x0C;
 
     // Windows prepends the report ID, so xonard's buf[6] is index 7 here.
@@ -183,10 +184,15 @@ static partial class XonarU1
     {
         if (Array.IndexOf(args, "--uninstall") >= 0)
         {
-            Tray.UnregisterStartup();
+            Uninstall();
             return 0;
         }
         if (Array.IndexOf(args, "--rename") >= 0) return RenameCard() ? 0 : 1;
+        if (!IsInstalled())
+        {
+            Install();
+            return 0;
+        }
         bool first;
         using (new Mutex(true, "Local\\XonarU1", out first))
         {
@@ -201,6 +207,76 @@ static partial class XonarU1
             tray.Dispose();
             return 0;
         }
+    }
+
+    // The download is its own installer: run from anywhere else, it copies
+    // itself here and starts that copy. No admin rights needed.
+    static string InstallDir
+    {
+        get
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "XonarU1");
+        }
+    }
+
+    static string InstalledExe
+    {
+        get { return Path.Combine(InstallDir, "XonarU1.exe"); }
+    }
+
+    static bool IsInstalled()
+    {
+        return string.Equals(Path.GetFullPath(Application.ExecutablePath), InstalledExe, StringComparison.OrdinalIgnoreCase);
+    }
+
+    static void StopOtherCopies()
+    {
+        int self = System.Diagnostics.Process.GetCurrentProcess().Id;
+        foreach (var other in System.Diagnostics.Process.GetProcessesByName("XonarU1"))
+        {
+            if (other.Id == self) continue;
+            other.Kill();
+            other.WaitForExit(3000);
+        }
+    }
+
+    static void Install()
+    {
+        StopOtherCopies();
+        Directory.CreateDirectory(InstallDir);
+        File.Copy(Application.ExecutablePath, InstalledExe, true);
+        using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
+        {
+            key.SetValue("DisplayName", "XonarU1 for ASUS Xonar U1");
+            key.SetValue("DisplayVersion", Version);
+            key.SetValue("Publisher", "XonarU1 contributors");
+            key.SetValue("DisplayIcon", InstalledExe);
+            key.SetValue("InstallLocation", InstallDir);
+            key.SetValue("UninstallString", "\"" + InstalledExe + "\" --uninstall");
+            key.SetValue("URLInfoAbout", "https://github.com/Igloczek/asus-xonar-u1-windows");
+            key.SetValue("EstimatedSize", (int)(new FileInfo(InstalledExe).Length / 1024), RegistryValueKind.DWord);
+            key.SetValue("NoModify", 1, RegistryValueKind.DWord);
+            key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+        }
+        System.Diagnostics.Process.Start(InstalledExe, "--show");
+    }
+
+    static void Uninstall()
+    {
+        StopOtherCopies();
+        Tray.UnregisterStartup();
+        Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
+        string settings = Path.GetDirectoryName(ConfigPath);
+        if (Directory.Exists(settings)) Directory.Delete(settings, true);
+
+        // A running exe can't delete itself, so leave that to cmd after exiting.
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe",
+            "/c ping -n 3 127.0.0.1 >nul & rd /s /q \"" + InstallDir + "\"")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false,
+            WorkingDirectory = Path.GetTempPath(),
+        });
     }
 
     static void ServeForever()
