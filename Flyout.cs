@@ -1,6 +1,7 @@
 // XonarU1: the tray flyout. Layout and styles live in Flyout.xaml.
 // Copyright (C) 2026 XonarU1 contributors. Licensed under GPL-3.0-or-later.
 using System;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -35,6 +36,7 @@ static partial class XonarU1
         readonly TextBlock status;
         readonly CheckBox ledSwitch;
         readonly TextBlock ledState;
+        readonly Border renameCard;
         readonly StackPanel ledOptions;
         readonly UniformGrid ledColors, effects, sensitivity;
         IntPtr hwnd;
@@ -112,6 +114,9 @@ static partial class XonarU1
 
             ((Button)panel.FindName("Exit")).Click += (s, e) => Application.Current.Shutdown();
 
+            renameCard = (Border)panel.FindName("RenameCard");
+            ((Button)panel.FindName("Rename")).Click += (s, e) => RequestRename();
+
             window = new Window
             {
                 Width = PanelWidth,
@@ -183,8 +188,26 @@ static partial class XonarU1
             tray.LedChanged();
         }
 
+        // Renaming needs admin rights, which this app doesn't otherwise use.
+        void RequestRename()
+        {
+            try
+            {
+                var start = new ProcessStartInfo(System.Windows.Forms.Application.ExecutablePath, "--rename")
+                {
+                    UseShellExecute = true,
+                    Verb = "runas",
+                };
+                using (var rename = Process.Start(start)) rename.WaitForExit();
+            }
+            // The user declined the admin prompt.
+            catch (System.ComponentModel.Win32Exception) { }
+            Sync();
+        }
+
         void Sync()
         {
+            renameCard.Visibility = CardNeedsRename() ? Visibility.Visible : Visibility.Collapsed;
             ledSwitch.IsChecked = config.LedOn;
             ledState.Text = config.LedOn ? "On" : "Off";
             ledOptions.IsEnabled = config.LedOn;

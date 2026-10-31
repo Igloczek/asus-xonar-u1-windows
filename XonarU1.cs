@@ -9,6 +9,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using System.Windows.Threading;
@@ -19,6 +20,11 @@ static partial class XonarU1
 {
     const string DeviceFilter = "vid_0b05&pid_1743";
     const int ReportSize = 17;
+
+    // The card reports itself as "USB Advanced Audio Device".
+    const string CardName = "ASUS Xonar U1";
+    const string AudioFunctionFilter = "VID_0B05&PID_1743&MI_00";
+    const int SPDRP_FRIENDLYNAME = 0x0C;
 
     // Windows prepends the report ID, so xonard's buf[6] is index 7 here.
     const int ControlByte = 7;
@@ -177,6 +183,7 @@ static partial class XonarU1
             Tray.UnregisterStartup();
             return 0;
         }
+        if (Array.IndexOf(args, "--rename") >= 0) return RenameCard() ? 0 : 1;
         bool first;
         using (new Mutex(true, "Local\\XonarU1", out first))
         {
@@ -425,8 +432,55 @@ static partial class XonarU1
         finally { SetupDiDestroyDeviceInfoList(set); }
     }
 
+    // Finds the card's audio function, which is what names the sound devices.
+    static bool FindAudioFunction(IntPtr set, ref DeviceData d)
+    {
+        for (int i = 0; ; i++)
+        {
+            d = new DeviceData();
+            d.Size = Marshal.SizeOf(d);
+            if (!SetupDiEnumDeviceInfo(set, i, ref d)) return false;
+            var id = new StringBuilder(512);
+            int need;
+            if (SetupDiGetDeviceInstanceId(set, ref d, id, id.Capacity, out need) && id.ToString().ToUpperInvariant().Contains(AudioFunctionFilter))
+                return true;
+        }
+    }
+
+    static bool CardNeedsRename()
+    {
+        IntPtr set = SetupDiGetClassDevsAll(IntPtr.Zero, "USB", IntPtr.Zero, 0x6);
+        try
+        {
+            var d = new DeviceData();
+            if (!FindAudioFunction(set, ref d)) return false;
+            var name = new byte[512];
+            int type, need;
+            if (!SetupDiGetDeviceRegistryProperty(set, ref d, SPDRP_FRIENDLYNAME, out type, name, name.Length, out need)) return true;
+            return Encoding.Unicode.GetString(name, 0, need).TrimEnd('\0') != CardName;
+        }
+        finally { SetupDiDestroyDeviceInfoList(set); }
+    }
+
+    // Needs admin rights. Windows picks the new name up when the card reconnects.
+    static bool RenameCard()
+    {
+        IntPtr set = SetupDiGetClassDevsAll(IntPtr.Zero, "USB", IntPtr.Zero, 0x6);
+        try
+        {
+            var d = new DeviceData();
+            if (!FindAudioFunction(set, ref d)) return false;
+            var name = Encoding.Unicode.GetBytes(CardName + "\0");
+            return SetupDiSetDeviceRegistryProperty(set, ref d, SPDRP_FRIENDLYNAME, name, name.Length);
+        }
+        finally { SetupDiDestroyDeviceInfoList(set); }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     struct InterfaceData { public int Size; public Guid Class; public int Flags; public IntPtr Reserved; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct DeviceData { public int Size; public Guid Class; public int Instance; public IntPtr Reserved; }
 
     [DllImport("hid.dll")]
     static extern void HidD_GetHidGuid(out Guid g);
@@ -440,4 +494,14 @@ static partial class XonarU1
     static extern bool SetupDiGetDeviceInterfaceDetail(IntPtr set, ref InterfaceData data, IntPtr detail, int size, out int need, IntPtr info);
     [DllImport("setupapi.dll")]
     static extern bool SetupDiDestroyDeviceInfoList(IntPtr set);
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiGetClassDevsW")]
+    static extern IntPtr SetupDiGetClassDevsAll(IntPtr g, string enumerator, IntPtr parent, int flags);
+    [DllImport("setupapi.dll")]
+    static extern bool SetupDiEnumDeviceInfo(IntPtr set, int index, ref DeviceData data);
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiGetDeviceInstanceIdW")]
+    static extern bool SetupDiGetDeviceInstanceId(IntPtr set, ref DeviceData data, StringBuilder id, int size, out int need);
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiGetDeviceRegistryPropertyW")]
+    static extern bool SetupDiGetDeviceRegistryProperty(IntPtr set, ref DeviceData data, int property, out int type, byte[] buffer, int size, out int need);
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiSetDeviceRegistryPropertyW")]
+    static extern bool SetupDiSetDeviceRegistryProperty(IntPtr set, ref DeviceData data, int property, byte[] buffer, int size);
 }

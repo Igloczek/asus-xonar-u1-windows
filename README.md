@@ -10,6 +10,7 @@ ASUS dropped support for this card, but it still sounds great and plays fine on 
 - **Mute:** pressing the knob toggles mute.
 - **LED control:** on or off, blue, red or purple, and solid, blinking or reacting to audio.
 - **Knob sensitivity:** low, medium or high.
+- **Real card name:** one click replaces the generic "USB Advanced Audio Device" with "ASUS Xonar U1" in Windows sound settings. This needs admin approval once, and the new name appears after you replug the card.
 - **Always on:** it starts with Windows like a driver would. No admin rights needed.
 
 It doesn't install a driver or replace the one you have. Sound keeps playing through the Windows driver, and this app only talks to the card's control interface.
