@@ -30,7 +30,7 @@ static partial class XonarU1
 
         readonly Tray tray;
         readonly Window window;
-        readonly Border panel;
+        readonly Border panel, ledCard, knobCard;
         readonly TranslateTransform slide;
         readonly TextBlock status;
         readonly CheckBox ledSwitch;
@@ -48,6 +48,8 @@ static partial class XonarU1
                 panel = (Border)XamlReader.Load(xaml);
             slide = (TranslateTransform)panel.FindName("Slide");
             status = (TextBlock)panel.FindName("Status");
+            ledCard = (Border)panel.FindName("LedCard");
+            knobCard = (Border)panel.FindName("KnobCard");
             ledSwitch = (CheckBox)panel.FindName("LedSwitch");
             ledState = (TextBlock)panel.FindName("LedState");
             ledOptions = (StackPanel)panel.FindName("LedOptions");
@@ -174,6 +176,8 @@ static partial class XonarU1
         public void UpdateStatus(bool connected)
         {
             status.Text = connected ? "Connected" : "Card not found";
+            ledCard.IsEnabled = connected;
+            knobCard.IsEnabled = connected;
         }
 
         void LedChanged()

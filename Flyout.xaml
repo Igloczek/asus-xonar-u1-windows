@@ -29,6 +29,14 @@
       </Style.Triggers>
     </Style>
 
+    <Style x:Key="Label" TargetType="TextBlock">
+      <Style.Triggers>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Opacity" Value="0.4"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
     <Style x:Key="Switch" TargetType="CheckBox">
       <Setter Property="Focusable" Value="False"/>
       <Setter Property="Template">
@@ -45,6 +53,9 @@
                 <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                 <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/>
                 <Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource OnAccentBrush}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -125,7 +136,7 @@
         </StackPanel>
       </Border>
 
-      <Border Style="{StaticResource Card}">
+      <Border x:Name="LedCard" Style="{StaticResource Card}">
         <StackPanel>
           <Grid>
             <Grid.ColumnDefinitions>
@@ -133,8 +144,8 @@
               <ColumnDefinition Width="Auto"/>
               <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <TextBlock Text="LED" FontWeight="SemiBold" VerticalAlignment="Center"/>
-            <TextBlock x:Name="LedState" Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0"
+            <TextBlock Text="LED" Style="{StaticResource Label}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <TextBlock x:Name="LedState" Grid.Column="1" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0,0,10,0"
                        Foreground="{DynamicResource SubtleBrush}"/>
             <CheckBox x:Name="LedSwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center"/>
           </Grid>
@@ -151,7 +162,7 @@
         </StackPanel>
       </Border>
 
-      <Border Style="{StaticResource Card}">
+      <Border x:Name="KnobCard" Style="{StaticResource Card}">
         <StackPanel>
           <TextBlock Text="Knob sensitivity" Style="{StaticResource Heading}"/>
           <Border Background="{DynamicResource WellBrush}" CornerRadius="5" Padding="2">

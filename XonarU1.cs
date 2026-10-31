@@ -1,4 +1,4 @@
-// XonarU1: tray app for the ASUS Xonar U1 (USB 0B05:1743) volume knob and LEDs.
+// XonarU1: tray app for the ASUS Xonar U1 volume knob and LEDs.
 // Copyright (C) 2026 XonarU1 contributors. Licensed under GPL-3.0-or-later.
 //
 // Runs on the stock Microsoft USB audio driver: everything goes through the
@@ -18,12 +18,13 @@ using Microsoft.Win32.SafeHandles;
 
 static partial class XonarU1
 {
-    const string DeviceFilter = "vid_0b05&pid_1743";
+    // Both are the Xonar U1. Only 1743 has been tested with this protocol.
+    static readonly string[] CardIds = { "vid_0b05&pid_1743", "vid_0b05&pid_1739" };
     const int ReportSize = 17;
 
     // The card reports itself as "USB Advanced Audio Device".
     const string CardName = "ASUS Xonar U1";
-    const string AudioFunctionFilter = "VID_0B05&PID_1743&MI_00";
+    const string AudioFunction = "&mi_00";
     const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\XonarU1";
     const int SPDRP_FRIENDLYNAME = 0x0C;
 
@@ -484,6 +485,14 @@ static partial class XonarU1
         return new FileStream(h, access, ReportSize, false);
     }
 
+    static bool IsCard(string id, string function)
+    {
+        id = id.ToLowerInvariant();
+        foreach (var card in CardIds)
+            if (id.Contains(card + function)) return true;
+        return false;
+    }
+
     static string FindDevicePath()
     {
         Guid g;
@@ -504,7 +513,7 @@ static partial class XonarU1
                     Marshal.WriteInt32(b, IntPtr.Size == 8 ? 8 : 6);
                     if (!SetupDiGetDeviceInterfaceDetail(set, ref d, b, need, out need, IntPtr.Zero)) continue;
                     string path = Marshal.PtrToStringUni(b + 4);
-                    if (path.ToLowerInvariant().Contains(DeviceFilter)) return path;
+                    if (IsCard(path, "")) return path;
                 }
                 finally { Marshal.FreeHGlobal(b); }
             }
@@ -522,7 +531,7 @@ static partial class XonarU1
             if (!SetupDiEnumDeviceInfo(set, i, ref d)) return false;
             var id = new StringBuilder(512);
             int need;
-            if (SetupDiGetDeviceInstanceId(set, ref d, id, id.Capacity, out need) && id.ToString().ToUpperInvariant().Contains(AudioFunctionFilter))
+            if (SetupDiGetDeviceInstanceId(set, ref d, id, id.Capacity, out need) && IsCard(id.ToString(), AudioFunction))
                 return true;
         }
     }

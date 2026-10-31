@@ -30,7 +30,7 @@ Go to **Settings → Apps → Installed apps**, find **XonarU1 for ASUS Xonar U1
 
 ## Good to know
 
-- **Supported card:** Xonar U1 with USB ID `0B05:1743`, tested on Windows 11. You can check the ID in Device Manager. The `0B05:1739` version isn't supported yet.
+- **Supported cards:** Xonar U1 with USB ID `0B05:1743`, tested on Windows 11. The `0B05:1739` version is enabled but untested, so please [open an issue](https://github.com/Igloczek/asus-xonar-u1-windows/issues) to say whether it works. You can check the ID in Device Manager.
 - **Volume steps:** the knob moves the volume 2% at a time, the same as keyboard volume keys, and controls your default output.
 - **Purple looks mostly red:** both LEDs are on, but the red one is much stronger.
 - **Unplugging during a game:** some apps stay silent after the card comes back. Windows moves them to another output and doesn't move them back, so restart the app. Browsers recover on their own.
