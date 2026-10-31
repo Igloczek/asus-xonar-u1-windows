@@ -46,7 +46,7 @@ build.cmd
 - Only the red LED can react to audio, so **On activity** isn't available for blue. Purple's blinking and on activity effects pulse the red LED over a steady blue one.
 - Purple turns both LEDs on, but the red one is much stronger, so it looks close to red. The card has no brightness control, and fast blinking doesn't work as dimming because it blinks too slowly.
 - The flyout's translucent background needs Windows 11 22H2 or later. Older versions get a solid panel. That fallback is untested.
-- After unplugging the card, an app that was playing audio may stay silent until you restart it. That's Windows behaviour for USB audio, and the card itself recovers on its own.
+- After unplugging the card, an app that was playing audio may stay silent until you restart it. Windows moves it to another output when the card disappears and doesn't move it back when the card returns. The card itself recovers on its own.
 - The app has to be running for the knob to work. The LED setting stays on the card until it loses power or resets.
 - When an app running as administrator has focus, Windows may block the volume keys this app sends.
 
