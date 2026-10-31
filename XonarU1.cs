@@ -281,7 +281,9 @@ static partial class XonarU1
     {
         StopOtherCopies();
         Directory.CreateDirectory(InstallDir);
-        File.Copy(Application.ExecutablePath, InstalledExe, true);
+        // Not File.Copy: that keeps the download's "from the internet" mark, and
+        // Windows would ask for confirmation all over again on the installed copy.
+        File.WriteAllBytes(InstalledExe, File.ReadAllBytes(Application.ExecutablePath));
         using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
         {
             key.SetValue("DisplayName", "XonarU1 for ASUS Xonar U1");
