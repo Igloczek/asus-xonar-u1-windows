@@ -5,6 +5,8 @@
 // card's HID interface. Protocol from xonard by Alessandro Pignotti
 // (github.com/alexp-sssup/asus-xonar-u1-utils).
 using System;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
@@ -27,6 +29,8 @@ static partial class XonarU1
     const string AudioFunction = "&mi_00";
     const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\XonarU1";
     const int SPDRP_FRIENDLYNAME = 0x0C;
+    const int ERROR_CANCELLED = 1223;
+    const int ASFW_ANY = -1;
 
     // Windows prepends the report ID, so xonard's buf[6] is index 7 here.
     const int ControlByte = 7;
@@ -82,9 +86,11 @@ static partial class XonarU1
     static Tray tray;
 
     // Open write handle while the card is connected; guards LED writes from
-    // the menu and the watchdog.
+    // the flyout and the watchdog.
     static readonly object deviceLock = new object();
     static FileStream device;
+
+    static readonly object configLock = new object();
 
     static string ConfigPath
     {
@@ -97,29 +103,48 @@ static partial class XonarU1
     static Config LoadConfig()
     {
         var c = new Config();
-        if (!File.Exists(ConfigPath)) return c;
-        foreach (var line in File.ReadAllLines(ConfigPath))
+        try
         {
-            var kv = line.Split(new[] { '=' }, 2);
-            if (kv.Length != 2) continue;
-            string k = kv[0].Trim().ToLowerInvariant(), v = kv[1].Trim();
-            int n;
-            if (k == "led") c.LedOn = v.ToLowerInvariant() != "off";
-            else if (k == "color") c.Color = v.ToLowerInvariant();
-            else if (k == "effect") c.Effect = v.ToLowerInvariant();
-            else if (k == "divider" && int.TryParse(v, out n) && n > 0) c.Divider = n;
-            else if (k == "rename") c.RenameDeclined = v == "declined";
+            if (!File.Exists(ConfigPath)) return c;
+            foreach (var line in File.ReadAllLines(ConfigPath))
+            {
+                var kv = line.Split(new[] { '=' }, 2);
+                if (kv.Length != 2) continue;
+                string k = kv[0].Trim().ToLowerInvariant(), v = kv[1].Trim();
+                int n;
+                if (k == "led") c.LedOn = v.ToLowerInvariant() != "off";
+                else if (k == "color") c.Color = v.ToLowerInvariant();
+                else if (k == "effect") c.Effect = v.ToLowerInvariant();
+                else if (k == "divider" && int.TryParse(v, out n)) c.Divider = n;
+                else if (k == "rename") c.RenameDeclined = v == "declined";
+            }
         }
+        // The knob matters more than the settings, so start with the defaults.
+        catch (Exception) { return new Config(); }
+
+        var defaults = new Config();
+        if (!Array.Exists(LedColors, led => led.Id == c.Color)) c.Color = defaults.Color;
+        if (Array.IndexOf(Effects, c.Effect) < 0) c.Effect = defaults.Effect;
+        if (c.Color == "blue" && c.Effect == "activity") c.Effect = defaults.Effect;
+        if (Array.IndexOf(Dividers, c.Divider) < 0) c.Divider = defaults.Divider;
         return c;
     }
 
     static void SaveConfig()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath));
-        File.WriteAllLines(ConfigPath, new[] {
-            "led=" + (config.LedOn ? "on" : "off"), "color=" + config.Color, "effect=" + config.Effect, "divider=" + config.Divider,
-            "rename=" + (config.RenameDeclined ? "declined" : "auto")
-        });
+        lock (configLock)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath));
+                File.WriteAllLines(ConfigPath, new[] {
+                    "led=" + (config.LedOn ? "on" : "off"), "color=" + config.Color, "effect=" + config.Effect, "divider=" + config.Divider,
+                    "rename=" + (config.RenameDeclined ? "declined" : "auto")
+                });
+            }
+            // A locked file costs one save, which must not take the knob down.
+            catch (Exception) { }
+        }
     }
 
     static void SendGlobal(FileStream dev, byte conf)
@@ -143,29 +168,26 @@ static partial class XonarU1
 
     static void Apply(FileStream dev, Config c)
     {
-        bool blue = c.Color == "blue", red = c.Color == "red";
-
-        // Blue is "off" by blinking with a zero duty cycle. Purple keeps it
-        // solid underneath whatever the red LED does.
-        byte blueBase = (byte)(c.Color == "purple" ? BlueSolid : BlueBlink);
-
+        // Blue is "off" by blinking with a zero duty cycle.
         if (!c.LedOn)
         {
             SendGlobal(dev, KnobReports | BlueBlink | RedOff);
             SendBlink(dev, BlueLed, 0, 0);
         }
-        else if (blue)
+        else if (c.Color == "blue")
         {
             SendGlobal(dev, (byte)(KnobReports | (c.Effect == "blink" ? BlueBlink : BlueSolid) | RedOff));
             if (c.Effect == "blink") SendBlink(dev, BlueLed, BlinkOn, BlinkPeriod);
         }
         else
         {
-            SendGlobal(dev, (byte)(KnobReports | blueBase | (c.Effect == "activity" ? RedAudio : RedBlink)));
+            // Purple keeps blue solid underneath whatever the red LED does.
+            bool purple = c.Color == "purple";
+            SendGlobal(dev, (byte)(KnobReports | (purple ? BlueSolid : BlueBlink) | (c.Effect == "activity" ? RedAudio : RedBlink)));
             if (c.Effect == "blink") SendBlink(dev, RedLed, BlinkOn, BlinkPeriod);
             // Time on past the period keeps the LED lit without flicker.
             else if (c.Effect == "solid") SendBlink(dev, RedLed, 201, 200);
-            if (red) SendBlink(dev, BlueLed, 0, 0);
+            if (!purple) SendBlink(dev, BlueLed, 0, 0);
         }
         dev.Flush();
     }
@@ -191,8 +213,16 @@ static partial class XonarU1
         if (Array.IndexOf(args, "--rename") >= 0) return RenameCard() ? 0 : 1;
         if (!IsInstalled())
         {
-            Install();
-            return 0;
+            try
+            {
+                Install();
+                return 0;
+            }
+            catch (Exception e)
+            {
+                MessageBox.Show("XonarU1 could not be installed.\n\n" + e.Message, "XonarU1", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return 1;
+            }
         }
         bool first;
         using (new Mutex(true, "Local\\XonarU1", out first))
@@ -232,12 +262,18 @@ static partial class XonarU1
 
     static void StopOtherCopies()
     {
-        int self = System.Diagnostics.Process.GetCurrentProcess().Id;
-        foreach (var other in System.Diagnostics.Process.GetProcessesByName("XonarU1"))
+        int self = Process.GetCurrentProcess().Id;
+        foreach (var other in Process.GetProcessesByName("XonarU1"))
         {
             if (other.Id == self) continue;
-            other.Kill();
-            other.WaitForExit(3000);
+            // It may have just exited, or belong to another user or an
+            // elevated rename. Anything that matters fails at the file copy.
+            try
+            {
+                other.Kill();
+                other.WaitForExit(3000);
+            }
+            catch (Exception) { }
         }
     }
 
@@ -259,7 +295,9 @@ static partial class XonarU1
             key.SetValue("NoModify", 1, RegistryValueKind.DWord);
             key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
         }
-        System.Diagnostics.Process.Start(InstalledExe, "--show");
+        // The flyout closes when it loses focus, so it has to be able to get focus.
+        AllowSetForegroundWindow(ASFW_ANY);
+        Process.Start(InstalledExe, "--show");
     }
 
     static void Uninstall()
@@ -271,7 +309,7 @@ static partial class XonarU1
         if (Directory.Exists(settings)) Directory.Delete(settings, true);
 
         // A running exe can't delete itself, so leave that to cmd after exiting.
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe",
+        Process.Start(new ProcessStartInfo("cmd.exe",
             "/c ping -n 3 127.0.0.1 >nul & rd /s /q \"" + InstallDir + "\"")
         {
             CreateNoWindow = true,
@@ -286,9 +324,11 @@ static partial class XonarU1
         {
             try
             {
-                using (var dev = OpenDevice(FileAccess.Write))
-                using (var input = OpenDevice(FileAccess.Read))
-                    if (dev != null && input != null) Serve(dev, input);
+                string path = FindDevicePath();
+                if (path != null)
+                    using (var dev = OpenDevice(path, FileAccess.Write))
+                    using (var input = OpenDevice(path, FileAccess.Read))
+                        if (dev != null && input != null) Serve(dev, input);
             }
             // Unplugging surfaces as several exception types; just reconnect.
             catch (Exception) { }
@@ -369,6 +409,11 @@ static partial class XonarU1
         keybd_event(vk, 0, 1 | 2, UIntPtr.Zero);
     }
 
+    static string StatusText(bool connected)
+    {
+        return connected ? "Connected" : "Card not found";
+    }
+
     class Tray : IDisposable
     {
         const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -412,9 +457,8 @@ static partial class XonarU1
 
         void Refresh()
         {
-            string state = connected ? "Connected" : "Card not found";
             flyout.UpdateStatus(connected);
-            icon.Text = "Xonar U1: " + state;
+            icon.Text = "Xonar U1: " + StatusText(connected);
             var old = icon.Icon;
             icon.Icon = DrawIcon(connected ? CurrentColor() : Color.DimGray, connected);
             if (old != null) old.Dispose();
@@ -474,11 +518,11 @@ static partial class XonarU1
     static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")]
     static extern bool DestroyIcon(IntPtr icon);
+    [DllImport("user32.dll")]
+    static extern bool AllowSetForegroundWindow(int processId);
 
-    static FileStream OpenDevice(FileAccess access)
+    static FileStream OpenDevice(string path, FileAccess access)
     {
-        string path = FindDevicePath();
-        if (path == null) return null;
         uint desired = access == FileAccess.Read ? 0x80000000u : 0x40000000u;
         var h = CreateFile(path, desired, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
         if (h.IsInvalid) return null;
@@ -502,11 +546,13 @@ static partial class XonarU1
         {
             for (int i = 0; ; i++)
             {
-                var d = new InterfaceData();
+                var d = new SetupData();
                 d.Size = Marshal.SizeOf(d);
                 if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref g, i, ref d)) return null;
                 int need;
                 SetupDiGetDeviceInterfaceDetail(set, ref d, IntPtr.Zero, 0, out need, IntPtr.Zero);
+                // Zero means the device vanished after being listed.
+                if (need == 0) continue;
                 IntPtr b = Marshal.AllocHGlobal(need);
                 try
                 {
@@ -522,11 +568,11 @@ static partial class XonarU1
     }
 
     // Finds the card's audio function, which is what names the sound devices.
-    static bool FindAudioFunction(IntPtr set, ref DeviceData d)
+    static bool FindAudioFunction(IntPtr set, ref SetupData d)
     {
         for (int i = 0; ; i++)
         {
-            d = new DeviceData();
+            d = new SetupData();
             d.Size = Marshal.SizeOf(d);
             if (!SetupDiEnumDeviceInfo(set, i, ref d)) return false;
             var id = new StringBuilder(512);
@@ -536,19 +582,26 @@ static partial class XonarU1
         }
     }
 
-    static bool CardNeedsRename()
+    static bool WithAudioFunction(bool ifMissing, Func<IntPtr, SetupData, bool> use)
     {
         IntPtr set = SetupDiGetClassDevsAll(IntPtr.Zero, "USB", IntPtr.Zero, 0x6);
         try
         {
-            var d = new DeviceData();
-            if (!FindAudioFunction(set, ref d)) return false;
+            var d = new SetupData();
+            return FindAudioFunction(set, ref d) ? use(set, d) : ifMissing;
+        }
+        finally { SetupDiDestroyDeviceInfoList(set); }
+    }
+
+    static bool CardNeedsRename()
+    {
+        return WithAudioFunction(false, (set, d) =>
+        {
             var name = new byte[512];
             int type, need;
             if (!SetupDiGetDeviceRegistryProperty(set, ref d, SPDRP_FRIENDLYNAME, out type, name, name.Length, out need)) return true;
             return Encoding.Unicode.GetString(name, 0, need).TrimEnd('\0') != CardName;
-        }
-        finally { SetupDiDestroyDeviceInfoList(set); }
+        });
     }
 
     // Renaming needs admin rights, which this app doesn't otherwise use, so it
@@ -560,20 +613,32 @@ static partial class XonarU1
         try
         {
             if (!CardNeedsRename()) return;
-            var start = new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath, "--rename")
+            var start = new ProcessStartInfo(Application.ExecutablePath, "--rename")
             {
                 UseShellExecute = true,
                 Verb = "runas",
             };
-            using (var rename = System.Diagnostics.Process.Start(start)) rename.WaitForExit();
+            using (var rename = Process.Start(start))
+            {
+                if (rename == null) return;
+                rename.WaitForExit();
+                // Prompting on every reconnect won't help if it can't work.
+                if (rename.ExitCode != 0) StopAskingToRename();
+            }
         }
-        // The user declined the admin prompt, so don't keep asking.
-        catch (System.ComponentModel.Win32Exception)
+        catch (Win32Exception e)
         {
-            config.RenameDeclined = true;
-            try { SaveConfig(); } catch (Exception) { }
+            if (e.NativeErrorCode == ERROR_CANCELLED) StopAskingToRename();
         }
+        // The name is cosmetic, so a failure here must not take the knob down.
+        catch (Exception) { }
         finally { renaming = 0; }
+    }
+
+    static void StopAskingToRename()
+    {
+        config.RenameDeclined = true;
+        SaveConfig();
     }
 
     static int renaming;
@@ -581,22 +646,16 @@ static partial class XonarU1
     // Windows picks the new name up when the card reconnects.
     static bool RenameCard()
     {
-        IntPtr set = SetupDiGetClassDevsAll(IntPtr.Zero, "USB", IntPtr.Zero, 0x6);
-        try
+        return WithAudioFunction(false, (set, d) =>
         {
-            var d = new DeviceData();
-            if (!FindAudioFunction(set, ref d)) return false;
             var name = Encoding.Unicode.GetBytes(CardName + "\0");
             return SetupDiSetDeviceRegistryProperty(set, ref d, SPDRP_FRIENDLYNAME, name, name.Length);
-        }
-        finally { SetupDiDestroyDeviceInfoList(set); }
+        });
     }
 
+    // SP_DEVICE_INTERFACE_DATA and SP_DEVINFO_DATA share this layout.
     [StructLayout(LayoutKind.Sequential)]
-    struct InterfaceData { public int Size; public Guid Class; public int Flags; public IntPtr Reserved; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct DeviceData { public int Size; public Guid Class; public int Instance; public IntPtr Reserved; }
+    struct SetupData { public int Size; public Guid Class; public int Value; public IntPtr Reserved; }
 
     [DllImport("hid.dll")]
     static extern void HidD_GetHidGuid(out Guid g);
@@ -605,19 +664,19 @@ static partial class XonarU1
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode)]
     static extern IntPtr SetupDiGetClassDevs(ref Guid g, IntPtr enumerator, IntPtr parent, int flags);
     [DllImport("setupapi.dll")]
-    static extern bool SetupDiEnumDeviceInterfaces(IntPtr set, IntPtr info, ref Guid g, int index, ref InterfaceData data);
+    static extern bool SetupDiEnumDeviceInterfaces(IntPtr set, IntPtr info, ref Guid g, int index, ref SetupData data);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiGetDeviceInterfaceDetailW")]
-    static extern bool SetupDiGetDeviceInterfaceDetail(IntPtr set, ref InterfaceData data, IntPtr detail, int size, out int need, IntPtr info);
+    static extern bool SetupDiGetDeviceInterfaceDetail(IntPtr set, ref SetupData data, IntPtr detail, int size, out int need, IntPtr info);
     [DllImport("setupapi.dll")]
     static extern bool SetupDiDestroyDeviceInfoList(IntPtr set);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiGetClassDevsW")]
     static extern IntPtr SetupDiGetClassDevsAll(IntPtr g, string enumerator, IntPtr parent, int flags);
     [DllImport("setupapi.dll")]
-    static extern bool SetupDiEnumDeviceInfo(IntPtr set, int index, ref DeviceData data);
+    static extern bool SetupDiEnumDeviceInfo(IntPtr set, int index, ref SetupData data);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiGetDeviceInstanceIdW")]
-    static extern bool SetupDiGetDeviceInstanceId(IntPtr set, ref DeviceData data, StringBuilder id, int size, out int need);
+    static extern bool SetupDiGetDeviceInstanceId(IntPtr set, ref SetupData data, StringBuilder id, int size, out int need);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiGetDeviceRegistryPropertyW")]
-    static extern bool SetupDiGetDeviceRegistryProperty(IntPtr set, ref DeviceData data, int property, out int type, byte[] buffer, int size, out int need);
+    static extern bool SetupDiGetDeviceRegistryProperty(IntPtr set, ref SetupData data, int property, out int type, byte[] buffer, int size, out int need);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiSetDeviceRegistryPropertyW")]
-    static extern bool SetupDiSetDeviceRegistryProperty(IntPtr set, ref DeviceData data, int property, byte[] buffer, int size);
+    static extern bool SetupDiSetDeviceRegistryProperty(IntPtr set, ref SetupData data, int property, byte[] buffer, int size);
 }

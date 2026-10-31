@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  TAG: ${{ github.ref_name }}
+
 jobs:
   release:
     runs-on: windows-latest
@@ -17,7 +20,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          $env:VERSION = '${{ github.ref_name }}'.TrimStart('v')
+          $env:VERSION = $env:TAG.TrimStart('v')
           cmd /c build.cmd
           if (-not (Test-Path XonarU1.exe)) { exit 1 }
           Rename-Item XonarU1.exe XonarU1-Setup.exe
@@ -27,7 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create '${{ github.ref_name }}' XonarU1-Setup.exe `
-            --title '${{ github.ref_name }}' `
+          gh release create $env:TAG XonarU1-Setup.exe `
+            --title $env:TAG `
             --notes 'Download **XonarU1-Setup.exe** and run it. See the README for details.' `
             --generate-notes

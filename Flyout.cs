@@ -37,8 +37,7 @@ static partial class XonarU1
         readonly TextBlock ledState;
         readonly StackPanel ledOptions;
         readonly UniformGrid ledColors, effects, sensitivity;
-        IntPtr hwnd;
-        bool hasBackdrop;
+        readonly IntPtr hwnd;
         int hiddenAt = Environment.TickCount - ReopenGuardMs;
 
         public Flyout(Tray tray)
@@ -66,49 +65,28 @@ static partial class XonarU1
             foreach (var led in LedColors)
             {
                 string id = led.Id;
-                var segment = new RadioButton
-                {
-                    Content = led.Label,
-                    GroupName = "Color",
-                    Style = (Style)panel.FindResource("Segment"),
-                };
-                segment.Click += (s, e) =>
+                AddSegment(ledColors, led.Label, () =>
                 {
                     config.Color = id;
                     if (id == "blue" && config.Effect == "activity") config.Effect = "solid";
                     LedChanged();
-                };
-                ledColors.Children.Add(segment);
+                });
             }
 
             for (int i = 0; i < Effects.Length; i++)
             {
                 string effect = Effects[i];
-                var segment = new RadioButton
-                {
-                    Content = EffectLabels[i],
-                    GroupName = "Effect",
-                    Style = (Style)panel.FindResource("Segment"),
-                };
-                segment.Click += (s, e) =>
+                AddSegment(effects, EffectLabels[i], () =>
                 {
                     config.Effect = effect;
                     LedChanged();
-                };
-                effects.Children.Add(segment);
+                });
             }
 
             for (int i = 0; i < Dividers.Length; i++)
             {
                 int divider = Dividers[i];
-                var segment = new RadioButton
-                {
-                    Content = DividerLabels[i],
-                    GroupName = "Sensitivity",
-                    Style = (Style)panel.FindResource("Segment"),
-                };
-                segment.Click += (s, e) => tray.SelectDivider(divider);
-                sensitivity.Children.Add(segment);
+                AddSegment(sensitivity, DividerLabels[i], () => tray.SelectDivider(divider));
             }
 
             ((Button)panel.FindName("Exit")).Click += (s, e) => Application.Current.Shutdown();
@@ -140,6 +118,14 @@ static partial class XonarU1
 
             // Without the system menu the frame has no close button.
             SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) & ~WS_SYSMENU);
+        }
+
+        // Radio buttons with the same parent form a group by themselves.
+        void AddSegment(UniformGrid group, string label, Action onClick)
+        {
+            var segment = new RadioButton { Content = label, Style = (Style)panel.FindResource("Segment") };
+            segment.Click += (s, e) => onClick();
+            group.Children.Add(segment);
         }
 
         public void Toggle()
@@ -175,7 +161,7 @@ static partial class XonarU1
 
         public void UpdateStatus(bool connected)
         {
-            status.Text = connected ? "Connected" : "Card not found";
+            status.Text = StatusText(connected);
             ledCard.IsEnabled = connected;
             knobCard.IsEnabled = connected;
         }
@@ -212,7 +198,7 @@ static partial class XonarU1
             DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
             // Windows 10 and early 11 have no system backdrop, so the panel
             // falls back to a solid colour there.
-            hasBackdrop = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int)) == 0;
+            bool hasBackdrop = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int)) == 0;
 
             Set("PanelBrush", hasBackdrop ? "#00000000" : (light ? "#F3F3F3" : "#2B2B2B"));
             Set("TextBrush", light ? "#E4000000" : "#FFFFFFFF");
