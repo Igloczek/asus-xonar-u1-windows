@@ -64,20 +64,19 @@ static partial class XonarU1
             foreach (var led in LedColors)
             {
                 string id = led.Id;
-                var tile = new RadioButton
+                var segment = new RadioButton
                 {
                     Content = led.Label,
                     GroupName = "Color",
-                    Style = (Style)panel.FindResource("LedTile"),
-                    Tag = new SolidColorBrush(Color.FromRgb(led.Color.R, led.Color.G, led.Color.B)),
+                    Style = (Style)panel.FindResource("Segment"),
                 };
-                tile.Click += (s, e) =>
+                segment.Click += (s, e) =>
                 {
                     config.Color = id;
                     if (id == "blue" && config.Effect == "activity") config.Effect = "solid";
                     LedChanged();
                 };
-                ledColors.Children.Add(tile);
+                ledColors.Children.Add(segment);
             }
 
             for (int i = 0; i < Effects.Length; i++)
