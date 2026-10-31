@@ -73,6 +73,7 @@ static partial class XonarU1
         public bool LedOn = true;
         public string Color = "blue", Effect = "solid";
         public int Divider = 3;
+        public bool RenameDeclined;
     }
 
     static Config config;
@@ -105,6 +106,7 @@ static partial class XonarU1
             else if (k == "color") c.Color = v.ToLowerInvariant();
             else if (k == "effect") c.Effect = v.ToLowerInvariant();
             else if (k == "divider" && int.TryParse(v, out n) && n > 0) c.Divider = n;
+            else if (k == "rename") c.RenameDeclined = v == "declined";
         }
         return c;
     }
@@ -113,7 +115,8 @@ static partial class XonarU1
     {
         Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath));
         File.WriteAllLines(ConfigPath, new[] {
-            "led=" + (config.LedOn ? "on" : "off"), "color=" + config.Color, "effect=" + config.Effect, "divider=" + config.Divider
+            "led=" + (config.LedOn ? "on" : "off"), "color=" + config.Color, "effect=" + config.Effect, "divider=" + config.Divider,
+            "rename=" + (config.RenameDeclined ? "declined" : "auto")
         });
     }
 
@@ -224,6 +227,7 @@ static partial class XonarU1
             device = dev;
         }
         tray.SetConnected(true);
+        new Thread(RenameInBackground) { IsBackground = true }.Start();
 
         // The card forgets its setup across sleep, so reapply after any gap
         // in this timer.
@@ -462,7 +466,34 @@ static partial class XonarU1
         finally { SetupDiDestroyDeviceInfoList(set); }
     }
 
-    // Needs admin rights. Windows picks the new name up when the card reconnects.
+    // Renaming needs admin rights, which this app doesn't otherwise use, so it
+    // happens in an elevated copy of itself. The card isn't restarted to apply
+    // the name, because that would cut audio in whatever is playing.
+    static void RenameInBackground()
+    {
+        if (config.RenameDeclined || Interlocked.Exchange(ref renaming, 1) == 1) return;
+        try
+        {
+            if (!CardNeedsRename()) return;
+            var start = new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath, "--rename")
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+            using (var rename = System.Diagnostics.Process.Start(start)) rename.WaitForExit();
+        }
+        // The user declined the admin prompt, so don't keep asking.
+        catch (System.ComponentModel.Win32Exception)
+        {
+            config.RenameDeclined = true;
+            try { SaveConfig(); } catch (Exception) { }
+        }
+        finally { renaming = 0; }
+    }
+
+    static int renaming;
+
+    // Windows picks the new name up when the card reconnects.
     static bool RenameCard()
     {
         IntPtr set = SetupDiGetClassDevsAll(IntPtr.Zero, "USB", IntPtr.Zero, 0x6);
