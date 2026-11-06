@@ -569,41 +569,39 @@ static partial class XonarU1
         finally { SetupDiDestroyDeviceInfoList(set); }
     }
 
-    // Finds the card's audio function, which is what names the sound devices.
-    static bool FindAudioFunction(IntPtr set, ref SetupData d)
-    {
-        for (int i = 0; ; i++)
-        {
-            d = new SetupData();
-            d.Size = Marshal.SizeOf(d);
-            if (!SetupDiEnumDeviceInfo(set, i, ref d)) return false;
-            var id = new StringBuilder(512);
-            int need;
-            if (SetupDiGetDeviceInstanceId(set, ref d, id, id.Capacity, out need) && IsCard(id.ToString(), AudioFunction))
-                return true;
-        }
-    }
-
-    static bool WithAudioFunction(bool ifMissing, Func<IntPtr, SetupData, bool> use)
+    // Calls visit with each connected Xonar's audio function, which is the
+    // device whose name the sound entries copy.
+    static void ForEachAudioFunction(Action<IntPtr, SetupData> visit)
     {
         IntPtr set = SetupDiGetClassDevsAll(IntPtr.Zero, "USB", IntPtr.Zero, 0x6);
         try
         {
-            var d = new SetupData();
-            return FindAudioFunction(set, ref d) ? use(set, d) : ifMissing;
+            for (int i = 0; ; i++)
+            {
+                var d = new SetupData();
+                d.Size = Marshal.SizeOf(d);
+                if (!SetupDiEnumDeviceInfo(set, i, ref d)) return;
+                var id = new StringBuilder(512);
+                int need;
+                if (SetupDiGetDeviceInstanceId(set, ref d, id, id.Capacity, out need) && IsCard(id.ToString(), AudioFunction))
+                    visit(set, d);
+            }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
     }
 
     static bool CardNeedsRename()
     {
-        return WithAudioFunction(false, (set, d) =>
+        bool needed = false;
+        ForEachAudioFunction((set, d) =>
         {
             var name = new byte[512];
             int type, need;
-            if (!SetupDiGetDeviceRegistryProperty(set, ref d, SPDRP_FRIENDLYNAME, out type, name, name.Length, out need)) return true;
-            return Encoding.Unicode.GetString(name, 0, need).TrimEnd('\0') != CardName;
+            if (!SetupDiGetDeviceRegistryProperty(set, ref d, SPDRP_FRIENDLYNAME, out type, name, name.Length, out need)
+                || Encoding.Unicode.GetString(name, 0, need).TrimEnd('\0') != CardName)
+                needed = true;
         });
+        return needed;
     }
 
     // Renaming needs admin rights, which this app doesn't otherwise use, so it
@@ -645,14 +643,18 @@ static partial class XonarU1
 
     static int renaming;
 
-    // Windows picks the new name up when the card reconnects.
+    // Windows copies this name into the sound menu when the card reconnects.
+    // Writing the sound menu entries directly once blanked the names of every
+    // USB sound device, so that's left to Windows.
     static bool RenameCard()
     {
-        return WithAudioFunction(false, (set, d) =>
+        bool ok = true;
+        ForEachAudioFunction((set, d) =>
         {
             var name = Encoding.Unicode.GetBytes(CardName + "\0");
-            return SetupDiSetDeviceRegistryProperty(set, ref d, SPDRP_FRIENDLYNAME, name, name.Length);
+            ok &= SetupDiSetDeviceRegistryProperty(set, ref d, SPDRP_FRIENDLYNAME, name, name.Length);
         });
+        return ok;
     }
 
     // SP_DEVICE_INTERFACE_DATA and SP_DEVINFO_DATA share this layout.
