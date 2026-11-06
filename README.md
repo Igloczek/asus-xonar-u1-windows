@@ -23,7 +23,7 @@ That's it. The panel opens straight away, and the knob works. The new card name 
 
 To change settings later, click the ring icon in the system tray. It may be hidden under the `^` arrow.
 
-To update, click **Check for updates** at the bottom of the panel. Versions before 1.0.4 don't have this link, so download and run the latest version the same way.
+To update, click **Check for updates** at the bottom of the panel. Versions before 1.0.4 don't have this link, so download and run the latest version the same way. See [what's new](CHANGELOG.md) in each version.
 
 ## Uninstall
 

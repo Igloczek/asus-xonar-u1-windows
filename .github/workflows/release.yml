@@ -17,6 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # First, so a missing changelog entry stops the release before anything is built.
+      - name: Release notes
+        shell: pwsh
+        run: ./.github/release-notes.ps1 -Version $env:TAG.TrimStart('v') | Set-Content notes.md -Encoding utf8
+
       - name: Build
         shell: pwsh
         run: |
@@ -29,8 +34,4 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create $env:TAG XonarU1-Setup.exe `
-            --title $env:TAG `
-            --notes 'Download **XonarU1-Setup.exe** and run it. See the README for details.' `
-            --generate-notes
+        run: gh release create $env:TAG XonarU1-Setup.exe --title $env:TAG --notes-file notes.md
